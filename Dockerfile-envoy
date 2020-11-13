@@ -1,0 +1,9 @@
+FROM frolvlad/alpine-glibc
+
+ADD ./envoy_1.12 /envoy
+
+RUN chmod 777 /envoy 
+
+ADD ./envoy.yaml /etc/
+
+CMD /envoy -l info -c /etc/envoy.yaml --service-node front-node --service-cluster front-cluster

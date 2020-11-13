@@ -1,0 +1,124 @@
+static_resources:
+  listeners:
+  - address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 80
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.rbac
+        config:
+          stat_prefix: "rabc_nt"
+          rules: 
+            action: DENY
+            policies:
+              "network-rules":
+                permissions:
+                  - destination_port: 443
+                principals:
+                  - any: true
+      - name: envoy.http_connection_manager
+        config:
+          generate_request_id: true
+          tracing:
+            operation_name: ingress
+          codec_type: auto
+          stat_prefix: ingress_http
+          route_config:
+            name: local_route
+            virtual_hosts:
+            - name: serviceA
+              domains:
+              - "*"
+              routes:
+              - match:
+                  prefix: "/"
+                route:
+                  timeout: 35s
+                  cluster: serviceA-cluster 
+                # per_filter_config:
+                #   envoy.filters.http.rbac:
+                #     rbac:
+                #       rules:
+                #         action: DENY
+                #         policies:
+                #           "per-route-rule":
+                #             permissions:
+                #               - header: { name: ":path", exact_match: "/service/1" }
+                #             principals:
+                #               - header: 
+                #                   name: "X-App"
+                #                   exact_match: "A"
+          http_filters:
+          - name: envoy.filters.http.rbac
+            config:
+              # stat_prefix: "rabc_nt"
+              rules: 
+                action: ALLOW
+                policies:
+                  "http-rules":
+                    permissions:
+                      # - any: true
+                      - header: { name: ":path", exact_match: "/service/1" }
+                      - header: { name: ":path", exact_match: "/service/2" }
+                      - url_path: { path: { exact: "/service/3"}}
+                      - url_path: { path: { prefix: "/"}}
+                    principals:
+                      - header: 
+                          name: "X-App"
+                          exact_match: "A"
+                      - header: 
+                          name: "X-App"
+                          exact_match: "B"
+                    condition:
+                      call_expr:
+                        function: endsWith
+                        args:
+                        - select_expr:
+                          operand:
+                            ident_expr:
+                              name: request
+                          field: method
+                        - const_expr:
+                          string_value: GET
+                # action: DENY
+                # policies:
+                #   "http-rules":
+                #     permissions:
+                #       - any: true
+                #       # - or_rules:
+                #       #     rules:
+                #       #       - header: { name: ":path", exact_match: "/service/1" }
+                #       #       - header: { name: ":path", exact_match: "/service/2" }
+                #     principals:
+                #       - header: 
+                #           name: "X-App"
+                #           exact_match: "C"
+          - name: envoy.router
+            config: 
+              upstream_log: 
+                name: envoy.file_access_log
+                config:
+                  path: "/dev/stdout"
+                  format: |
+                    [%START_TIME%] "%REQ(:METHOD)% %REQ(X-ENVOY-ORIGINAL-PATH?:PATH)% %PROTOCOL%" %RESPONSE_CODE% %RESPONSE_FLAGS% %BYTES_RECEIVED% %BYTES_SENT% %DURATION% %RESP(X-ENVOY-UPSTREAM-SERVICE-TIME)% "%REQ(X-FORWARDED-FOR)%" "%REQ(USER-AGENT)%" "%REQ(X-REQUEST-ID)%" "%REQ(:AUTHORITY)%" "%UPSTREAM_HOST%"
+  clusters:
+  - name: serviceA-cluster
+    connect_timeout: 100s
+    type: strict_dns
+    lb_policy: round_robin
+    load_assignment:
+      cluster_name: serviceA-cluster
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: api_service
+                port_value: 80
+admin:
+  access_log_path: "/dev/null"
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9901
